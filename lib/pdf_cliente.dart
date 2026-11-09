@@ -91,7 +91,7 @@ Future<void> gerarPdfCliente(Map<String, dynamic> cliente, List<Map<String, dyna
             );
           }),
         pw.SizedBox(height: 20),
-        pw.Text('Gerado pelo RotaCampo', style: const pw.TextStyle(color: PdfColors.grey500, fontSize: 9)),
+        pw.Text('Gerado pelo Porteira sem fronteiras', style: const pw.TextStyle(color: PdfColors.grey500, fontSize: 9)),
       ],
     ),
   );

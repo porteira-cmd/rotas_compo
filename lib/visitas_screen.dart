@@ -60,6 +60,30 @@ class _VisitasScreenState extends State<VisitasScreen> {
     }
   }
 
+  // Apagar visita/check-in (só gestor) — usa a função apagar_checkin no banco
+  Future<void> _apagarVisita(Map<String, dynamic> v) async {
+    final nome = (v['clientes'] as Map<String, dynamic>?)?['nome'] ?? 'cliente';
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Apagar visita'),
+        content: Text('Apagar a visita de $nome? Essa ação não pode ser desfeita. (A prescrição ligada, se houver, não é apagada por aqui.)'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancelar')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), style: FilledButton.styleFrom(backgroundColor: const Color(0xFFC23A2B)), child: const Text('Apagar')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    try {
+      await supabase.rpc('apagar_checkin', params: {'p_id': v['id']});
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Visita apagada.'), backgroundColor: AppColors.teal700));
+      _carregar();
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Não foi possível apagar: $e')));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -87,6 +111,14 @@ class _VisitasScreenState extends State<VisitasScreen> {
                                 const Icon(Icons.check_circle, color: Color(0xFF2E7D5B), size: 20),
                                 const SizedBox(width: 8),
                                 Expanded(child: Text(c?['nome'] ?? 'Cliente', style: const TextStyle(fontWeight: FontWeight.w700, color: AppColors.ink))),
+                                if (widget.role == UserRole.gestor)
+                                  IconButton(
+                                    padding: EdgeInsets.zero,
+                                    constraints: const BoxConstraints(),
+                                    icon: const Icon(Icons.delete_outline, color: Color(0xFFC23A2B), size: 20),
+                                    tooltip: 'Apagar visita',
+                                    onPressed: () => _apagarVisita(v),
+                                  ),
                               ]),
                               const SizedBox(height: 4),
                               Text(formatarData(v['feito_em'] as String?), style: const TextStyle(color: AppColors.muted, fontSize: 13)),

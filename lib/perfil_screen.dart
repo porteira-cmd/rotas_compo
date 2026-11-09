@@ -1,4 +1,4 @@
-  // ============================================================================
+// ============================================================================
 //  RotaCampo — Meu perfil (foto, nome e senha)
 //  Precisa: image_picker  •  bucket "fotos" no Storage  •  perfil.sql rodado
 //  Salve como: lib/perfil_screen.dart
@@ -18,8 +18,11 @@ class PerfilScreen extends StatefulWidget {
 
 class _PerfilScreenState extends State<PerfilScreen> {
   final _nome = TextEditingController();
+  final _telefone = TextEditingController();
   String _email = '';
   String _perfil = '';
+  String? _loja; // loja do vendedor (Casa de Adubo / Porteira)
+  static const _lojas = ['Casa de Adubo', 'Porteira'];
   String? _fotoUrl; // foto já salva
   Uint8List? _novaFoto; // foto escolhida, ainda não salva
   bool _carregando = true;
@@ -34,11 +37,14 @@ class _PerfilScreenState extends State<PerfilScreen> {
   Future<void> _carregar() async {
     try {
       final uid = supabase.auth.currentUser!.id;
-      final u = await supabase.from('usuarios').select('nome, email, perfil, foto_url').eq('id', uid).single();
+      final u = await supabase.from('usuarios').select('nome, email, perfil, foto_url, telefone, loja').eq('id', uid).single();
       setState(() {
         _nome.text = u['nome'] ?? '';
+        _telefone.text = u['telefone'] ?? '';
         _email = u['email'] ?? '';
         _perfil = u['perfil'] ?? '';
+        final l = u['loja'];
+        _loja = _lojas.contains(l) ? l as String : null;
         _fotoUrl = u['foto_url'];
         _carregando = false;
       });
@@ -79,6 +85,14 @@ class _PerfilScreenState extends State<PerfilScreen> {
         novaUrl = supabase.storage.from('fotos').getPublicUrl(path);
       }
       await supabase.rpc('atualizar_meu_perfil', params: {'p_nome': _nome.text.trim(), 'p_foto': novaUrl});
+      try {
+        await supabase.rpc('atualizar_meu_telefone', params: {'p_telefone': _telefone.text.trim()});
+      } catch (_) {}
+      if (_perfil == 'vendedor') {
+        try {
+          await supabase.rpc('atualizar_minha_loja', params: {'p_loja': _loja});
+        } catch (_) {}
+      }
       await _carregar();
       setState(() => _novaFoto = null);
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Perfil atualizado!'), backgroundColor: AppColors.teal700));
@@ -152,9 +166,23 @@ class _PerfilScreenState extends State<PerfilScreen> {
                 const SizedBox(height: 24),
                 TextField(controller: _nome, decoration: const InputDecoration(labelText: 'Nome', prefixIcon: Icon(Icons.person_outline), border: OutlineInputBorder())),
                 const SizedBox(height: 14),
+                TextField(controller: _telefone, keyboardType: TextInputType.phone, decoration: const InputDecoration(labelText: 'Telefone / WhatsApp', hintText: '(77) 99999-9999', prefixIcon: Icon(Icons.phone_outlined), border: OutlineInputBorder())),
+                const SizedBox(height: 14),
                 TextField(enabled: false, controller: TextEditingController(text: _email), decoration: const InputDecoration(labelText: 'E-mail', prefixIcon: Icon(Icons.mail_outline), border: OutlineInputBorder())),
                 const SizedBox(height: 14),
                 TextField(enabled: false, controller: TextEditingController(text: nomeDoPerfil(perfilFromText(_perfil))), decoration: const InputDecoration(labelText: 'Perfil', prefixIcon: Icon(Icons.badge_outlined), border: OutlineInputBorder())),
+                if (_perfil == 'vendedor') ...[
+                  const SizedBox(height: 14),
+                  DropdownButtonFormField<String>(
+                    value: _loja,
+                    isExpanded: true,
+                    decoration: const InputDecoration(labelText: 'Minha loja', prefixIcon: Icon(Icons.store_mall_directory_outlined), border: OutlineInputBorder()),
+                    items: _lojas.map((l) => DropdownMenuItem(value: l, child: Text(l))).toList(),
+                    onChanged: (v) => setState(() => _loja = v),
+                  ),
+                  const SizedBox(height: 4),
+                  const Text('Os clientes que você cadastrar entram nesta loja. Um cliente não pode se repetir na mesma loja.', style: TextStyle(color: AppColors.muted, fontSize: 12)),
+                ],
                 const SizedBox(height: 24),
                 SizedBox(
                   height: 50,

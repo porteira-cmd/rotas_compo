@@ -27,7 +27,7 @@ class MapaScreen extends StatefulWidget {
   State<MapaScreen> createState() => _MapaScreenState();
 }
 
-class _MapaScreenState extends State<MapaScreen> {
+class _MapaScreenState extends State<MapaScreen> with TickerProviderStateMixin {
   List<Map<String, dynamic>> _clientes = [];
   final List<Map<String, dynamic>> _rota = [];
   bool _carregando = true;
@@ -50,6 +50,36 @@ class _MapaScreenState extends State<MapaScreen> {
   final List<Marker> _rotAreas = [];
   final List<Polyline> _divisa = [];
   final List<Marker> _lojas = [];
+
+  final MapController _mapCtrl = MapController();
+
+  // Move/zoom com animação suave
+  void _moverAnimado(LatLng destino, double zoom) {
+    final cam = _mapCtrl.camera;
+    final latT = Tween<double>(begin: cam.center.latitude, end: destino.latitude);
+    final lngT = Tween<double>(begin: cam.center.longitude, end: destino.longitude);
+    final zT = Tween<double>(begin: cam.zoom, end: zoom);
+    final ctrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 400));
+    final anim = CurvedAnimation(parent: ctrl, curve: Curves.easeInOut);
+    ctrl.addListener(() => _mapCtrl.move(LatLng(latT.evaluate(anim), lngT.evaluate(anim)), zT.evaluate(anim)));
+    ctrl.addStatusListener((s) {
+      if (s == AnimationStatus.completed || s == AnimationStatus.dismissed) ctrl.dispose();
+    });
+    ctrl.forward();
+  }
+
+  // Zoom pelos botões (+ / −). A rodinha do mouse também funciona.
+  void _zoom(double delta) {
+    final c = _mapCtrl.camera;
+    _moverAnimado(c.center, (c.zoom + delta).clamp(3.0, 18.0));
+  }
+
+  // Enquadra todos os clientes na tela
+  void _verTudo() {
+    if (_clientes.isEmpty) return;
+    final pts = _clientes.map((c) => LatLng(_lat(c), _lng(c))).toList();
+    _mapCtrl.fitCamera(CameraFit.bounds(bounds: LatLngBounds.fromPoints(pts), padding: const EdgeInsets.all(40)));
+  }
 
   @override
   void initState() {
@@ -91,30 +121,21 @@ class _MapaScreenState extends State<MapaScreen> {
           (f['properties']['ly'] as num).toDouble(), (f['properties']['lx'] as num).toDouble(), cor,
           forte: true));
     }
-    // Divisa entre as áreas
-    for (final f in (jsonDecode(divisaJson)['features'] as List)) {
-      _divisa.add(Polyline(
-        points: _anel(f['geometry']['coordinates']),
-        color: const Color(0xFFEA580C),
-        strokeWidth: 3,
-      ));
-    }
+    // Divisão da região: linha azul seguindo o Rio de Contas (por Jussiapé)
+    _divisa.add(Polyline(
+      points: corteJussiape.map((p) => LatLng(p[0], p[1])).toList(),
+      color: const Color(0xFF1565C0), // azul (rio)
+      strokeWidth: 4,
+    ));
     // Lojas
     for (final s in (jsonDecode(lojasJson) as List)) {
       _lojas.add(Marker(
         point: LatLng((s['lat'] as num).toDouble(), (s['lng'] as num).toDouble()),
-        width: 40,
-        height: 40,
+        width: 60,
+        height: 60,
         child: GestureDetector(
           onTap: () => _abrirLoja(s),
-          child: Container(
-            decoration: BoxDecoration(
-              color: AppColors.teal900,
-              borderRadius: BorderRadius.circular(9),
-              border: Border.all(color: Colors.white, width: 2),
-            ),
-            child: const Icon(Icons.store, color: Colors.white, size: 20),
-          ),
+          child: const _LojaPulse(),
         ),
       ));
     }
@@ -231,7 +252,14 @@ class _MapaScreenState extends State<MapaScreen> {
     return Stack(
       children: [
         FlutterMap(
-          options: MapOptions(initialCenter: LatLng(-13.4, -41.5), initialZoom: 8.5, maxZoom: 18),
+          mapController: _mapCtrl,
+          options: const MapOptions(
+            initialCenter: LatLng(-13.4, -41.5),
+            initialZoom: 8.5,
+            minZoom: 3,
+            maxZoom: 18,
+            interactionOptions: InteractionOptions(flags: InteractiveFlag.all), // arrastar, pinça e rodinha do mouse
+          ),
           children: [
             // Camada base: satélite (Esri) ou mapa normal (OpenStreetMap)
             _satelite
@@ -260,6 +288,19 @@ class _MapaScreenState extends State<MapaScreen> {
           ],
         ),
         Positioned(top: 12, left: 12, child: _pill('${_clientes.length} clientes')),
+        Positioned(top: 54, left: 12, child: _legenda()),
+        // Botões de zoom e enquadrar
+        Positioned(
+          right: 12,
+          top: 80,
+          child: Column(children: [
+            _botaoMapa(Icons.add, 'Aproximar', () => _zoom(1)),
+            const SizedBox(height: 8),
+            _botaoMapa(Icons.remove, 'Afastar', () => _zoom(-1)),
+            const SizedBox(height: 14),
+            _botaoMapa(Icons.fit_screen_outlined, 'Ver todos', _verTudo),
+          ]),
+        ),
         if (_rota.isNotEmpty) Positioned(left: 12, right: 12, bottom: 12, child: _painelRota()),
       ],
     );
@@ -281,22 +322,58 @@ class _MapaScreenState extends State<MapaScreen> {
     final ordem = _rota.indexWhere((r) => r['id'] == c['id']) + 1;
     Widget pino;
     if (emRota) {
-      pino = Container(
-          decoration: BoxDecoration(color: AppColors.teal700, shape: BoxShape.circle, border: Border.all(color: Colors.white, width: 2)),
-          alignment: Alignment.center,
-          child: Text('$ordem', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800)));
+      pino = _dotNum('$ordem', AppColors.teal700);
     } else if (visitado) {
-      pino = const Icon(Icons.check_circle, color: Color(0xFF2E7D5B), size: 30); // verde = visitado (15 dias)
+      pino = _dotIcon(Icons.check, const Color(0xFF2E7D5B)); // verde = visitado (15 dias)
     } else {
-      pino = const Icon(Icons.location_on, color: AppColors.coral, size: 34);
+      // cor pela loja responsável: Piatã = azul | Barra = laranja
+      final barra = lojaResponsavel(c['municipio'] as String?, _lat(c), _lng(c)) == 'Loja de Barra da Estiva';
+      pino = _dotPlain(barra ? const Color(0xFFE8730C) : const Color(0xFF1565C0));
     }
     return Marker(
       point: LatLng(_lat(c), _lng(c)),
-      width: 44,
-      height: 44,
-      child: GestureDetector(onTap: () => _abrirDetalhes(c), child: pino),
+      width: 40,
+      height: 40,
+      child: GestureDetector(onTap: () => _abrirDetalhes(c), child: Center(child: pino)),
     );
   }
+
+  // Bolinhas modernas (borda branca + sombra)
+  BoxDecoration _dotDeco(Color cor) => BoxDecoration(
+        color: cor,
+        shape: BoxShape.circle,
+        border: Border.all(color: Colors.white, width: 2.5),
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(.28), blurRadius: 4, offset: const Offset(0, 2))],
+      );
+  Widget _dotPlain(Color cor) => Container(width: 20, height: 20, decoration: _dotDeco(cor));
+  Widget _dotIcon(IconData i, Color cor) => Container(width: 24, height: 24, alignment: Alignment.center, decoration: _dotDeco(cor), child: Icon(i, color: Colors.white, size: 15));
+  Widget _dotNum(String n, Color cor) => Container(width: 26, height: 26, alignment: Alignment.center, decoration: _dotDeco(cor), child: Text(n, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 12)));
+
+  // Legenda de cores
+  Widget _legenda() => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        decoration: BoxDecoration(color: Colors.white.withOpacity(.95), borderRadius: BorderRadius.circular(12), boxShadow: [BoxShadow(color: Colors.black.withOpacity(.12), blurRadius: 8)]),
+        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+          _legItem(const Color(0xFF1565C0), 'Piatã'),
+          _legItem(const Color(0xFFE8730C), 'Barra'),
+          _legItem(const Color(0xFF2E7D5B), 'Visitado (15d)'),
+        ]),
+      );
+  Widget _legItem(Color cor, String txt) => Padding(
+        padding: const EdgeInsets.symmetric(vertical: 2),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          Container(width: 12, height: 12, decoration: BoxDecoration(color: cor, shape: BoxShape.circle, border: Border.all(color: Colors.white, width: 1.5))),
+          const SizedBox(width: 6),
+          Text(txt, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.ink)),
+        ]),
+      );
+
+  Widget _botaoMapa(IconData icon, String tip, VoidCallback onTap) => Material(
+        color: Colors.white,
+        shape: const CircleBorder(),
+        elevation: 3,
+        child: IconButton(icon: Icon(icon, color: AppColors.teal700), tooltip: tip, onPressed: onTap),
+      );
 
   Widget _pill(String texto) => Container(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
@@ -448,6 +525,7 @@ class _MapaScreenState extends State<MapaScreen> {
           const SizedBox(height: 14),
           if ((c['telefone'] as String?)?.isNotEmpty == true) _linha(Icons.phone_outlined, c['telefone']),
           if ((c['municipio'] as String?)?.isNotEmpty == true) _linha(Icons.map_outlined, c['municipio']),
+          _linha(Icons.store_outlined, 'Responsável: ${lojaResponsavel(c['municipio'] as String?, _lat(c), _lng(c))}'),
           if ((c['endereco'] as String?)?.isNotEmpty == true) _linha(Icons.place_outlined, c['endereco']),
           _linha(Icons.my_location, '${_lat(c).toStringAsFixed(5)}, ${_lng(c).toStringAsFixed(5)}'),
           const SizedBox(height: 18),
@@ -497,6 +575,16 @@ class _MapaScreenState extends State<MapaScreen> {
               ),
             ),
           ]),
+          const SizedBox(height: 10),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: () { Navigator.pop(context); _apagar(c); },
+              icon: const Icon(Icons.delete_outline, size: 18),
+              label: const Text('Apagar cliente'),
+              style: OutlinedButton.styleFrom(foregroundColor: const Color(0xFFC23A2B), side: const BorderSide(color: Color(0xFFC23A2B)), padding: const EdgeInsets.symmetric(vertical: 12)),
+            ),
+          ),
         ]),
       ),
     );
@@ -510,6 +598,34 @@ class _MapaScreenState extends State<MapaScreen> {
           Expanded(child: Text(texto, style: const TextStyle(color: AppColors.ink, height: 1.4))),
         ]),
       );
+
+  // ---------- apagar cliente ----------
+  Future<void> _apagar(Map<String, dynamic> c) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Apagar cliente'),
+        content: Text('Apagar "${c['nome'] ?? 'este cliente'}"? Não dá pra desfazer.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancelar')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), style: FilledButton.styleFrom(backgroundColor: const Color(0xFFC23A2B)), child: const Text('Apagar')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    try {
+      await supabase.rpc('apagar_cliente', params: {'p_id': c['id']});
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Cliente apagado.'), backgroundColor: AppColors.teal700));
+      _rota.removeWhere((r) => r['id'] == c['id']);
+      await _carregar();
+    } catch (e) {
+      final msg = '$e'.toLowerCase().contains('gestor')
+          ? 'Apenas o Gestor pode apagar clientes.'
+          : 'Não foi possível apagar: $e';
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+    }
+  }
 
   // ---------- editar cliente ----------
   Future<void> _editar(Map<String, dynamic> c) async {
@@ -553,5 +669,55 @@ class _MapaScreenState extends State<MapaScreen> {
     } catch (e) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Não foi possível salvar (permissão?): $e')));
     }
+  }
+}
+
+// Marcador da loja com anel pulsante (chama atenção no mapa)
+class _LojaPulse extends StatefulWidget {
+  const _LojaPulse();
+  @override
+  State<_LojaPulse> createState() => _LojaPulseState();
+}
+
+class _LojaPulseState extends State<_LojaPulse> with SingleTickerProviderStateMixin {
+  late final AnimationController _c = AnimationController(vsync: this, duration: const Duration(milliseconds: 1800))..repeat();
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _c,
+      builder: (_, child) {
+        final t = _c.value; // 0 -> 1
+        final tam = 30 + t * 28;
+        return Stack(
+          alignment: Alignment.center,
+          children: [
+            Container(
+              width: tam,
+              height: tam,
+              decoration: BoxDecoration(shape: BoxShape.circle, color: AppColors.teal700.withOpacity((1 - t) * 0.35)),
+            ),
+            child!,
+          ],
+        );
+      },
+      child: Container(
+        width: 32,
+        height: 32,
+        decoration: BoxDecoration(
+          color: AppColors.teal900,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: Colors.white, width: 2),
+          boxShadow: [BoxShadow(color: Colors.black.withOpacity(.3), blurRadius: 5, offset: const Offset(0, 2))],
+        ),
+        child: const Icon(Icons.store, color: Colors.white, size: 18),
+      ),
+    );
   }
 }

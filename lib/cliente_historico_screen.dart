@@ -89,6 +89,37 @@ class _ClienteHistoricoScreenState extends State<ClienteHistoricoScreen> {
     }
   }
 
+  Future<void> _apagar() async {
+    final confirmar = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Apagar cliente'),
+        content: Text('Tem certeza que quer apagar "${_cliente['nome'] ?? 'este cliente'}"? Esta ação não pode ser desfeita.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancelar')),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: FilledButton.styleFrom(backgroundColor: const Color(0xFFC23A2B)),
+            child: const Text('Apagar'),
+          ),
+        ],
+      ),
+    );
+    if (confirmar != true) return;
+
+    try {
+      await supabase.rpc('apagar_cliente', params: {'p_id': _cliente['id']});
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Cliente apagado.'), backgroundColor: AppColors.teal700));
+      Navigator.of(context).pop(); // volta pra lista (que recarrega sozinha)
+    } catch (e) {
+      final msg = '$e'.toLowerCase().contains('gestor')
+          ? 'Apenas o Gestor pode apagar clientes.'
+          : 'Não foi possível apagar: $e';
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+    }
+  }
+
   @override
   void initState() {
     super.initState();
@@ -147,6 +178,11 @@ class _ClienteHistoricoScreenState extends State<ClienteHistoricoScreen> {
                 ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
                 : const Icon(Icons.picture_as_pdf_outlined),
             onPressed: (_carregando || _gerandoPdf) ? null : _gerarPdf,
+          ),
+          IconButton(
+            tooltip: 'Apagar cliente',
+            icon: const Icon(Icons.delete_outline),
+            onPressed: _carregando ? null : _apagar,
           ),
         ],
       ),

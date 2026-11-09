@@ -111,16 +111,81 @@ class _EquipeScreenState extends State<EquipeScreen> {
                         ),
                         title: Text(u['nome'] ?? '', style: const TextStyle(fontWeight: FontWeight.w600)),
                         subtitle: Text(u['email'] ?? ''),
-                        trailing: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                          decoration: BoxDecoration(color: _corPerfil(perfil).withOpacity(.12), borderRadius: BorderRadius.circular(999)),
-                          child: Text(_nomePerfil(perfil), style: TextStyle(color: _corPerfil(perfil), fontWeight: FontWeight.w600, fontSize: 12)),
-                        ),
+                        trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                            decoration: BoxDecoration(color: _corPerfil(perfil).withOpacity(.12), borderRadius: BorderRadius.circular(999)),
+                            child: Text(_nomePerfil(perfil), style: TextStyle(color: _corPerfil(perfil), fontWeight: FontWeight.w600, fontSize: 12)),
+                          ),
+                          if (perfil == 'vendedor' || perfil == 'tecnico')
+                            PopupMenuButton<String>(
+                              icon: const Icon(Icons.more_vert, color: AppColors.muted),
+                              onSelected: (v) {
+                                if (v == 'senha') _alterarSenha(u);
+                              },
+                              itemBuilder: (_) => const [
+                                PopupMenuItem(value: 'senha', child: Text('Alterar senha')),
+                              ],
+                            ),
+                        ]),
                       ),
                     );
                   },
                 ),
     );
+  }
+
+  // ---------- Alterar a senha de um vendedor/técnico ----------
+  Future<void> _alterarSenha(Map<String, dynamic> u) async {
+    final senha = TextEditingController();
+    bool obscure = true;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setD) => AlertDialog(
+          title: Text('Nova senha de ${u['nome']}'),
+          content: Column(mainAxisSize: MainAxisSize.min, children: [
+            Text('Defina uma nova senha para ${_nomePerfil(u['perfil'])}. Passe a nova senha para a pessoa.', style: const TextStyle(color: AppColors.muted, fontSize: 13)),
+            const SizedBox(height: 14),
+            TextField(
+              controller: senha,
+              obscureText: obscure,
+              decoration: InputDecoration(
+                labelText: 'Nova senha (mín. 6)',
+                border: const OutlineInputBorder(),
+                suffixIcon: IconButton(
+                  icon: Icon(obscure ? Icons.visibility_outlined : Icons.visibility_off_outlined),
+                  onPressed: () => setD(() => obscure = !obscure),
+                ),
+              ),
+            ),
+          ]),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancelar')),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              style: FilledButton.styleFrom(backgroundColor: AppColors.teal700),
+              child: const Text('Salvar senha'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (ok != true) return;
+    if (senha.text.length < 6) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('A senha precisa de ao menos 6 caracteres.')));
+      return;
+    }
+    try {
+      await supabase.rpc('gestor_definir_senha', params: {'p_user_id': u['id'], 'p_nova_senha': senha.text});
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Senha de ${u['nome']} alterada! Passe a nova senha para a pessoa.'), backgroundColor: AppColors.teal700),
+        );
+      }
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Não foi possível alterar: $e')));
+    }
   }
 
   // ---------- Cadastrar novo usuário ----------

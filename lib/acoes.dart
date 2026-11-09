@@ -72,6 +72,94 @@ Future<List<LatLng>?> buscarRotaReal(List<LatLng> paradas) async {
   }
 }
 
+// Busca lugares/pontos de referência pelo nome (geocodificação Nominatim/OSM).
+// Ex.: "Bar do João, Piatã". Devolve uma lista de {nome, lat, lng}.
+// A busca é direcionada ao Brasil e à região da Chapada Diamantina.
+Future<List<Map<String, dynamic>>> buscarEnderecos(String q) async {
+  if (q.trim().isEmpty) return [];
+  try {
+    final url = Uri.parse(
+      'https://nominatim.openstreetmap.org/search'
+      '?q=${Uri.encodeComponent(q)}'
+      '&format=jsonv2&limit=6&countrycodes=br'
+      '&viewbox=-42.3,-12.7,-40.9,-14.0&bounded=0',
+    );
+    final resp = await http.get(url, headers: {'User-Agent': 'PorteiraSemFronteiras/1.0'}).timeout(const Duration(seconds: 12));
+    if (resp.statusCode != 200) return [];
+    final data = jsonDecode(resp.body) as List;
+    return data
+        .map((e) => {
+              'nome': (e['display_name'] ?? '').toString(),
+              'lat': double.tryParse('${e['lat']}'),
+              'lng': double.tryParse('${e['lon']}'),
+            })
+        .where((e) => e['lat'] != null && e['lng'] != null)
+        .toList();
+  } catch (_) {
+    return [];
+  }
+}
+
+// Abre o Google Maps (app) já buscando o termo — útil pra achar comércios que
+// o OpenStreetMap não tem. Depois é só compartilhar o pino e colar o link.
+Future<bool> abrirBuscaMaps(String q) async {
+  final url = Uri.parse('https://www.google.com/maps/search/?api=1&query=${Uri.encodeComponent(q)}');
+  return launchUrl(url, mode: LaunchMode.externalApplication);
+}
+
+// Extrai coordenadas de um texto: "-13.402, -41.604" ou de um link do Google
+// Maps (q=lat,lng, @lat,lng, etc.). Devolve null se não achar.
+LatLng? extrairCoordenadas(String texto) {
+  final t = texto.trim();
+  final re = RegExp(r'(-?\d{1,3}\.\d{3,})\s*[, ]\s*(-?\d{1,3}\.\d{3,})');
+  final m = re.firstMatch(t);
+  if (m != null) {
+    final la = double.tryParse(m.group(1)!);
+    final ln = double.tryParse(m.group(2)!);
+    if (la != null && ln != null && la.abs() <= 90 && ln.abs() <= 180) {
+      return LatLng(la, ln);
+    }
+  }
+  return null;
+}
+
+// Resolve a localização enviada pelo cliente (link do Maps, inclusive curtos
+// como maps.app.goo.gl). Segue os redirecionamentos e procura as coordenadas.
+Future<LatLng?> resolverLocalizacaoLink(String url) async {
+  final direto = extrairCoordenadas(url);
+  if (direto != null) return direto;
+  final client = http.Client();
+  try {
+    var u = Uri.parse(url.trim());
+    for (var i = 0; i < 6; i++) {
+      final req = http.Request('GET', u)..followRedirects = false;
+      req.headers['User-Agent'] = 'Mozilla/5.0 PorteiraSemFronteiras/1.0';
+      final streamed = await client.send(req).timeout(const Duration(seconds: 12));
+      final loc = streamed.headers['location'];
+      // tenta nas coords do cabeçalho de redirecionamento
+      if (loc != null) {
+        final c = extrairCoordenadas(loc);
+        if (c != null) return c;
+      }
+      // e no corpo da resposta (alguns links trazem as coords numa meta/texto)
+      final body = await streamed.stream.bytesToString();
+      final cb = extrairCoordenadas(body);
+      if (cb != null) return cb;
+      // segue o próximo redirecionamento, se houver
+      if (loc != null && streamed.statusCode >= 300 && streamed.statusCode < 400) {
+        u = loc.startsWith('http') ? Uri.parse(loc) : u.resolve(loc);
+      } else {
+        break;
+      }
+    }
+  } catch (_) {
+    // ignora e devolve null
+  } finally {
+    client.close();
+  }
+  return null;
+}
+
 // Garante que o GPS está ligado e com permissão. Devolve true se pode usar.
 Future<bool> garantirPermissaoLocalizacao() async {
   if (!await Geolocator.isLocationServiceEnabled()) return false;

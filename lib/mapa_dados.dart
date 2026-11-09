@@ -15,3 +15,42 @@ const String areasJson = r'''{"type":"FeatureCollection","features":[{"type":"Fe
 
 // Linha divisória entre as áreas de atuação
 const String divisaJson = r'''{"type":"FeatureCollection","features":[{"type":"Feature","properties":{"name":"Divisa de atuação","lx":-41.52725,"ly":-13.44582},"geometry":{"type":"LineString","coordinates":[[-41.15962,-13.27312],[-41.29052,-13.32232],[-41.30744,-13.31607],[-41.32246,-13.30087],[-41.33439,-13.29814],[-41.34913,-13.28108],[-41.37049,-13.27684],[-41.38264,-13.27117],[-41.38979,-13.2631],[-41.39912,-13.22467],[-41.41554,-13.24579],[-41.44699,-13.25128],[-41.45378,-13.26243],[-41.45378,-13.29515],[-41.44402,-13.30605],[-41.43704,-13.32817],[-41.43927,-13.35722],[-41.44523,-13.36918],[-41.44592,-13.38329],[-41.54753,-13.42549],[-41.55106,-13.40968],[-41.57004,-13.41078],[-41.59153,-13.41792],[-41.59632,-13.42392],[-41.60527,-13.42478],[-41.6113,-13.42785],[-41.60635,-13.43984],[-41.60178,-13.43902],[-41.59677,-13.44642],[-41.59841,-13.45515],[-41.60296,-13.45787],[-41.59874,-13.46545],[-41.60154,-13.46788],[-41.60016,-13.47447],[-41.59552,-13.48024],[-41.57757,-13.4711],[-41.57824,-13.46137],[-41.56993,-13.45115],[-41.5624,-13.45199],[-41.5536,-13.44727],[-41.53891,-13.45402],[-41.53358,-13.44311],[-41.51894,-13.44939],[-41.51143,-13.44946],[-41.50813,-13.44533],[-41.50522,-13.44774],[-41.46952,-13.53732],[-41.48278,-13.54391],[-41.47226,-13.62266],[-41.45596,-13.62954],[-41.44396,-13.66156],[-41.43405,-13.66698],[-41.60785,-13.6597],[-41.60583,-13.67185],[-41.59637,-13.68196],[-41.59134,-13.69697],[-41.5999,-13.70877],[-41.59532,-13.7139],[-41.58637,-13.70854],[-41.59021,-13.72513],[-41.57732,-13.72658],[-41.57871,-13.73231],[-41.57274,-13.74557],[-41.57681,-13.75282],[-41.55709,-13.76398],[-41.54513,-13.76285],[-41.53832,-13.77203],[-41.5424,-13.77905],[-41.5304,-13.7814],[-41.53876,-13.78712],[-41.53713,-13.79198],[-41.54221,-13.80092],[-41.53546,-13.81183],[-41.52279,-13.81465],[-41.52635,-13.82195],[-41.52257,-13.82181],[-41.52257,-13.82436],[-41.52757,-13.82813],[-41.5169,-13.8356],[-41.51593,-13.84513],[-41.52118,-13.84861],[-41.51354,-13.85479],[-41.51763,-13.85884],[-41.51321,-13.86677],[-41.51948,-13.86773],[-41.50888,-13.87076],[-41.51082,-13.87734],[-41.5043,-13.89417],[-41.50801,-13.90279],[-41.49812,-13.90338],[-41.49851,-13.90882],[-41.49229,-13.91331]]}}]}''';
+
+// ============================================================================
+//  Divisão de Jussiapé entre as duas lojas
+//  Uma linha pela cidade de Jussiapé separa o município: o lado sul/leste
+//  (voltado pra Barra) fica com a Loja de Barra da Estiva; o lado norte/oeste
+//  (voltado pra Piatã) fica com a Loja de Piatã.
+// ============================================================================
+
+// Linha do rio (pontos em [lat, lng]) passando por Jussiapé. Desenhada em azul.
+// Para acompanhar mais curvas do rio, é só acrescentar pontos nesta lista.
+const List<List<double>> corteJussiape = [
+  [-13.480150, -41.595075], // início (norte)
+  [-13.543462, -41.619290], // fim (sul)
+];
+
+// Municípios de cada loja (fora Jussiapé, que é dividido pela linha).
+const Set<String> _munBarra = {'Barra da Estiva', 'Ibicoara', 'Ituaçu', 'Contendas do Sincorá'};
+const Set<String> _munPiata = {'Piatã', 'Rio de Contas', 'Mucugê', 'Abaíra', 'Boninal'};
+
+// Decide a loja responsável por um cliente, a partir do município e da posição.
+// Para Jussiapé, usa o lado da linha (eixo Piatã → Barra).
+String lojaResponsavel(String? municipio, double lat, double lng) {
+  final m = (municipio ?? '').trim();
+  if (_munBarra.contains(m)) return 'Loja de Barra da Estiva';
+  if (_munPiata.contains(m)) return 'Loja de Piatã';
+  if (m == 'Jussiape' || m == 'Jussiapé') {
+    // lado da linha do rio: leste -> Barra | oeste -> Piatã
+    final aLat = corteJussiape.first[0], aLng = corteJussiape.first[1];
+    final bLat = corteJussiape.last[0], bLng = corteJussiape.last[1];
+    final cross = (bLng - aLng) * (lat - aLat) - (bLat - aLat) * (lng - aLng);
+    return cross >= 0 ? 'Loja de Barra da Estiva' : 'Loja de Piatã';
+  }
+  // fora das áreas conhecidas: a loja fisicamente mais próxima
+  const pLat = -13.1540279, pLng = -41.7722207; // Piatã
+  const bLat = -13.6262707, bLng = -41.3253523; // Barra
+  final dp = (lat - pLat) * (lat - pLat) + (lng - pLng) * (lng - pLng);
+  final db = (lat - bLat) * (lat - bLat) + (lng - bLng) * (lng - bLng);
+  return db <= dp ? 'Loja de Barra da Estiva' : 'Loja de Piatã';
+}
